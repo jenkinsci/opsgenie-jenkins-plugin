@@ -2,7 +2,6 @@ package com.opsgenie.integration.jenkins.pipeline;
 
 import com.opsgenie.integration.jenkins.*;
 import hudson.Extension;
-import hudson.Launcher;
 import hudson.Util;
 import hudson.model.Run;
 import hudson.model.TaskListener;
@@ -136,9 +135,6 @@ public class OpsGenieTriggerStep extends AbstractStepImpl {
 
         @StepContextParameter
         private transient Run<?, ?> build;
-
-        @StepContextParameter
-        private transient Launcher launcher;
 
         @Override
         protected String run() throws Exception {
