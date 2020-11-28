@@ -4,21 +4,25 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import hudson.model.AbstractBuild;
-import hudson.model.Result;
-import hudson.model.Run;
-import hudson.model.Job;
-import hudson.model.User;
+import hudson.ProxyConfiguration;
+import hudson.model.*;
 import hudson.scm.ChangeLogSet;
 import hudson.tasks.test.AbstractTestResultAction;
 import hudson.tasks.test.TestResult;
+import jenkins.model.Jenkins;
 import jenkins.model.JenkinsLocationConfiguration;
 import org.apache.commons.lang.StringUtils;
+import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.utils.URIBuilder;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
 import org.slf4j.LoggerFactory;
@@ -26,6 +30,7 @@ import org.slf4j.LoggerFactory;
 import java.io.PrintStream;
 import java.net.URI;
 import java.util.*;
+import java.util.regex.Pattern;
 
 /**
  * @author Omer Ozkan
@@ -98,12 +103,51 @@ public class OpsGenieNotificationService {
                     .addParameter("apiKey", apiKey)
                     .build();
 
-            HttpClient client = HttpClientBuilder.create().build();
+            HttpClient client;
 
             HttpPost post = new HttpPost(uri);
             StringEntity params = new StringEntity(data);
             post.addHeader("content-type", "application/x-www-form-urlencoded");
             post.setEntity(params);
+
+            if (Jenkins.getInstance() != null && Jenkins.getInstance().proxy != null) {
+                // A proxy is configured, so we will use it for this request as well.
+                ProxyConfiguration proxy = Jenkins.getInstance().proxy;
+
+                // Check if the host of opsgenie is excluded from the proxy.
+                Boolean isHostExcludedFromProxy = false;
+                for (Pattern pattern: proxy.getNoProxyHostPatterns()) {
+                    if (pattern.matcher(host).matches()) {
+                        isHostExcludedFromProxy = true;
+                    }
+                }
+
+                if (!isHostExcludedFromProxy) {
+                    // Host is not excluded from proxy.
+                    if (proxy.getUserName() != null && proxy.getPassword() != null) {
+                        // Authentication for proxy is configured.
+                        CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+                        credentialsProvider.setCredentials(new AuthScope(proxy.name, proxy.port), new UsernamePasswordCredentials(proxy.getUserName(), proxy.getPassword()));
+                        client = HttpClientBuilder.create().setDefaultCredentialsProvider(credentialsProvider).build();
+                    } else {
+                        client = HttpClientBuilder.create().build();
+                    }
+
+                    HttpHost proxyHost = new HttpHost(proxy.name, proxy.port);
+                    RequestConfig config = RequestConfig.custom()
+                            .setProxy(proxyHost)
+                            .build();
+
+                    post.setConfig(config);
+                } else {
+                    // Proxy is configured but opsgenie should not use the proxy.
+                    client = HttpClientBuilder.create().build();
+                }
+            } else {
+                // No proxy is configured.
+                client = HttpClientBuilder.create().build();
+            }
+
             consoleOutputLogger.println("Sending job data to OpsGenie...");
             HttpResponse response = client.execute(post);
 
